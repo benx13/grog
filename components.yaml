@@ -1,0 +1,45 @@
+components:
+  query_input:
+    input: {}
+    output:
+      query: str
+
+  retrievers:
+    - type: "vector"
+      parameters:
+        uri: "tcp://192.168.1.96:19530"
+        collection_name: "collection"
+      input:
+        query: str
+      output:
+        context: str
+      method: "invoke"
+
+    - type: "graph"
+      parameters:
+        uri: "bolt://localhost:7687"
+        user: "neo4j"
+        password: "password"
+      input:
+        query: str
+      output:
+        context: str
+      method: "invoke"
+
+  llm:
+    type: "ollama"
+    parameters:
+      model: "qwen2.5:0.5b-instruct"
+      temperature: 0
+    input:
+      query: str
+      context: str
+    output:
+      response: str
+    method: "invoke"
+
+  response_output:
+    input:
+      response: str
+    output: {}
+ 

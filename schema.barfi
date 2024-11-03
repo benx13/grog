@@ -1,0 +1,127 @@
+{
+  "nodes": {
+    "Query Input-1": {
+      "type": "query_input",
+      "parameters": {},
+      "interfaces": {
+        "query": "output"
+      }
+    },
+    "Vector Retriever-1": {
+      "type": "vector_retriever",
+      "parameters": {
+        "uri": "tcp://192.168.1.96:19530",
+        "collection_name": "collection"
+      },
+      "interfaces": {
+        "query": "intput",
+        "context": "output"
+      }
+    },
+    "Llm-1": {
+      "type": "llm",
+      "parameters": {
+        "model": "qwen2.5:0.5b-instruct",
+        "temperature": 0
+      },
+      "interfaces": {
+        "query": "intput",
+        "context": "intput",
+        "response": "output"
+      }
+    },
+    "Response Output-1": {
+      "type": "response_output",
+      "parameters": {},
+      "interfaces": {
+        "response": "intput"
+      }
+    }
+  },
+  "edges": [
+    {
+      "source": "Query Input-1",
+      "source_port": "query",
+      "target": "Llm-1",
+      "target_port": "query"
+    },
+    {
+      "source": "Query Input-1",
+      "source_port": "query",
+      "target": "Vector Retriever-1",
+      "target_port": "query"
+    },
+    {
+      "source": "Vector Retriever-1",
+      "source_port": "context",
+      "target": "Llm-1",
+      "target_port": "context"
+    },
+    {
+      "source": "Llm-1",
+      "source_port": "response",
+      "target": "Response Output-1",
+      "target_port": "response"
+    }
+  ],
+  "config": {
+    "query_input": {
+      "input": {},
+      "output": {
+        "query": "str"
+      }
+    },
+    "retrievers": [
+      {
+        "type": "vector",
+        "parameters": {
+          "uri": "tcp://192.168.1.96:19530",
+          "collection_name": "collection"
+        },
+        "input": {
+          "query": "str"
+        },
+        "output": {
+          "context": "str"
+        },
+        "method": "invoke"
+      },
+      {
+        "type": "graph",
+        "parameters": {
+          "uri": "bolt://localhost:7687",
+          "user": "neo4j",
+          "password": "password"
+        },
+        "input": {
+          "query": "str"
+        },
+        "output": {
+          "context": "str"
+        },
+        "method": "invoke"
+      }
+    ],
+    "llm": {
+      "type": "ollama",
+      "parameters": {
+        "model": "qwen2.5:0.5b-instruct",
+        "temperature": 0
+      },
+      "input": {
+        "query": "str",
+        "context": "str"
+      },
+      "output": {
+        "response": "str"
+      },
+      "method": "invoke"
+    },
+    "response_output": {
+      "input": {
+        "response": "str"
+      },
+      "output": {}
+    }
+  }
+}

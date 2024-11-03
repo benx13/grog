@@ -1,163 +1,165 @@
+import networkx as nx
+import json
+import yaml
+from typing import Dict, Any
+
+# Import base components
+from components import QueryInput, ResponseOutput
 from retriever import Retriever
 from llm import LLM
-from sentence_splitter import SentenceSplitter
-from sentence_classifier import SentenceClassifier
 
 class RAGPipeline:
-    def __init__(self, config):
+    def __init__(self, barfi_path="schema.barfi", components_path="components.yaml"):
+        print("Initializing RAG Pipeline...")
+        
+        # Load configurations
+        with open(components_path, 'r') as f:
+            self.components_config = yaml.safe_load(f)['components']
+        
+        # Component class mapping
+        self.component_classes = {
+            'query_input': QueryInput,
+            'response_output': ResponseOutput,
+            'vector_retriever': lambda params: Retriever('vector', **params),
+            'graph_retriever': lambda params: Retriever('graph', **params),
+            'llm': lambda params: LLM('ollama', **params)
+        }
+        
+        self.pipeline_graph = self._load_barfi_schema(barfi_path)
         self.components = {}
-        self.pipeline = config['pipeline']
-        self.build_pipeline(config['components'])
+        self._initialize_components()
+        
+        print("Pipeline initialized successfully")
 
-    def build_pipeline(self, config):
-        # Initialize Graph Retriever
-        if 'graph_retriever' in config:
-            self.components['graph_retriever'] = Retriever(
-                'graph',
-                **config['graph_retriever']
-            )
-
-        # Initialize Vector Retriever
-        if 'vector_retriever' in config:
-            self.components['vector_retriever'] = Retriever(
-                'vector',
-                **config['vector_retriever']
-            )
-
-        # Initialize Sentence Splitter
-        if 'sentence_splitter' in config:
-            self.components['sentence_splitter'] = SentenceSplitter(
-                **config['sentence_splitter']
-            )
-
-        # Initialize Sentence Classifier
-        if 'sentence_classifier' in config:
-            self.components['sentence_classifier'] = SentenceClassifier(
-                **config['sentence_classifier']
-            )
-
-        # Initialize LLM
-        if 'llm' in config:
-            self.components['llm'] = LLM(
-                config['llm']['type'],
-                **config['llm']['params']
-            )
-
-        # Initialize other components (examples)
-        if 'router' in config:
-            self.components['router'] = self.create_router(config['router'])
-
-        if 'prompt_splitter' in config:
-            self.components['prompt_splitter'] = self.create_prompt_splitter(config['prompt_splitter'])
-
-        # Add more components as needed
-
-    def create_router(self, config):
-        # Placeholder for router creation
-        # Implement the actual router logic based on your needs
-        class Router:
-            def route(self, query):
-                # Add routing logic here
-                pass
-        return Router()
-
-    def create_prompt_splitter(self, config):
-        # Placeholder for prompt splitter creation
-        # Implement the actual prompt splitter logic based on your needs
-        class PromptSplitter:
-            def split(self, prompt):
-                # Add splitting logic here
-                pass
-        return PromptSplitter()
-
-    def process(self, query):
-        results = {}
-        queries = {}
-
-        # Route the query if a router is present
-        if self.pipeline['router']:
-            query = self.components['router'].route(query)
-
-        # Split the prompt if a prompt splitter is present
-        if self.pipeline['prompt_splitter']:
-            split_queries = self.components['prompt_splitter'].invoke(query)
+    def _load_barfi_schema(self, barfi_path: str) -> nx.DiGraph:
+        """Load the pipeline graph from a barfi schema file"""
+        print(f"Loading pipeline schema from {barfi_path}")
+        
+        with open(barfi_path, 'r', encoding='utf-8') as f:
+            barfi_data = json.load(f)
             
-
-        if self.pipeline['sentence_classifier']:
-
-        # Retrieve from graph
-        if self.pipeline['graph_retriever']:
-            results['graph_context'] = self.components['graph_retriever'].invoke(query)
-
-        # Retrieve from vector store
-        if self.pipeline['vector_retriever']:
-            results['vector_context'] = self.components['vector_retriever'].invoke(query)
-
-        # Process with LLM
-        if self.pipeline['llm']:
-            results['llm_response'] = self.components['llm'].invoke(
-                results.get('graph_context', ''),
-                results.get('vector_context', ''),
-                query
+        G = nx.DiGraph()
+        
+        # Add nodes
+        for node_id, node_data in barfi_data['nodes'].items():
+            component_type = node_data['type'].lower().replace(' ', '_')
+            print(f"Adding node: {node_id} of type {component_type}")
+            G.add_node(
+                node_id, 
+                type=component_type,
+                parameters=node_data.get('parameters', {}),
+                interfaces=node_data.get('interfaces', {})
             )
+        
+        # Add edges
+        for edge in barfi_data['edges']:
+            print(f"Adding edge: {edge['source']} -> {edge['target']}")
+            G.add_edge(
+                edge['source'], 
+                edge['target'],
+                source_port=edge['source_port'],
+                target_port=edge['target_port']
+            )
+            
+        return G
+
+    def _initialize_components(self):
+        """Initialize component instances"""
+        print("\nInitializing components...")
+        
+        for node_id, node_data in self.pipeline_graph.nodes(data=True):
+            component_type = node_data['type'].lower().replace(' ', '_')
+            parameters = node_data.get('parameters', {})
+            
+            try:
+                if 'retriever' in component_type:
+                    # Extract retriever type from component type (e.g., 'vector' from 'vector_retriever')
+                    retriever_type = component_type.split('_')[0]
+                    print(f"Initializing {retriever_type} retriever for node {node_id}")
+                    self.components[node_id] = Retriever(retriever_type, **parameters)
+                
+                elif component_type == 'llm':
+                    print(f"Initializing LLM for node {node_id}")
+                    self.components[node_id] = LLM('ollama', **parameters)
+                
+                elif component_type in ['query_input', 'response_output']:
+                    print(f"Initializing {component_type} for node {node_id}")
+                    component_class = self.component_classes[component_type]
+                    self.components[node_id] = component_class()
+                
+                else:
+                    print(f"Warning: Unknown component type {component_type}")
+                    
+            except Exception as e:
+                print(f"Error initializing component {node_id}: {str(e)}")
+                raise
+
+    def process(self, query: str) -> Dict[str, Any]:
+        print("\nStarting pipeline execution...")
+        print(f"Initial query: {query}")
+        
+        results = {}
+        
+        # Get processing order
+        try:
+            processing_order = list(nx.topological_sort(self.pipeline_graph))
+            print(f"Processing order: {processing_order}")
+        except nx.NetworkXUnfeasible:
+            raise ValueError("Pipeline graph must be acyclic")
+
+        # Process each node in order
+        for node_id in processing_order:
+            print(f"\nProcessing node: {node_id}")
+            
+            node_data = self.pipeline_graph.nodes[node_id]
+            component_type = node_data['type'].lower().replace(' ', '_')
+            component = self.components.get(node_id)
+            
+            if component is None:
+                print(f"Warning: No component found for node {node_id}")
+                continue
+                
+            # Collect inputs for the component
+            inputs = {'query': query}  # Pass original query to all components
+            for pred in self.pipeline_graph.predecessors(node_id):
+                edge_data = self.pipeline_graph[pred][node_id]
+                source_port = edge_data['source_port']
+                target_port = edge_data['target_port']
+                
+                # Get the output from the predecessor's results
+                pred_output = results.get(f"{pred}_{source_port}")
+                if pred_output is not None:
+                    print(f"  Input {target_port}: {pred_output}")
+                    inputs[target_port] = pred_output
+            
+            # Invoke the component
+            try:
+                print(f"  Invoking {component_type} component")
+                component_results = component.invoke(**inputs)
+                
+                # Store results
+                for output_name, output_value in component_results.items():
+                    result_key = f"{node_id}_{output_name}"
+                    results[result_key] = output_value
+                    print(f"  Output {output_name}: {output_value}")
+                    
+            except Exception as e:
+                print(f"Error processing node {node_id}: {str(e)}")
+                raise
+        
+        print("\nPipeline execution completed")
         return results
 
     def close(self):
-        # Close all retriever connections
+        """Close all components that have a close method"""
         for component in self.components.values():
-            if isinstance(component, Retriever):
+            if hasattr(component, 'close'):
                 component.close()
 
 if __name__ == "__main__":
-    # Example configuration
-    config = {
-        'pipeline': {
-            'prompt_splitter': False,
-            'router': False,
-            'graph_retriever': True,
-            'vector_retriever': True,
-            'sentence_classifier': True,
-            'llm': True
-        },
-        'components': {
-            'graph_retriever': {
-                'uri': "bolt://localhost:7687",
-            'user': "neo4j",
-            'password': "strongpassword"
-            },
-            'vector_retriever': {
-                'uri': "tcp://192.168.1.96:19530",
-                'collection_name': "context_path_chunks_noblogs____valid"
-            },
-            'sentence_splitter': {
-                'split_char': '.'  # Optional configuration
-            },
-            'sentence_classifier': {
-                'model_dir': '/path/to/your/model',
-                'device': 'cuda',  # or 'cpu'
-                'max_length': 512,
-                'batch_size': 32
-            },
-            'llm': {
-                'type': 'ollama',
-                'params': {
-                    'model': 'qwen2.5:0.5b-instruct',
-                    'temperature': 0
-                }
-            },
-            'router': {},  # Add router configuration if needed
-            'prompt_splitter': {}  # Add prompt splitter configuration if needed
-        }
-    }
+    # Example usage
+    pipeline = RAGPipeline()
+    results = pipeline.process("What is the capital of France?")
+    print("\nFinal Results:")
+    print(json.dumps(results, indent=2))
 
-    # Create and use the pipeline
-    pipeline = RAGPipeline(config)
-    query = "hello assitant, Who is Wassim Kezai?"
-    results = pipeline.process(query)
-
-    print("Graph Context:", results.get('graph_context', ''))
-    print("Vector Context:", results.get('vector_context', ''))
-    print("LLM Response:", results.get('llm_response', ''))
-
-    # Close the pipeline connections
-    pipeline.close()
