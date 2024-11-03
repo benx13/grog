@@ -6,13 +6,12 @@ import torch
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 class SentenceSplitter:
-    def __init__(self):
-
+    def __init__(self, device=None):
+        # Use provided device, fallback to CUDA if available, or CPU
+        self.device = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Use CUDA if available
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.splitter = SaT("sat-3l-sm").half().to(self.device)
-
+        self.splitter = SaT("sat-3l-sm")
+        self.splitter.half().to(self.device)
     def invoke(self, text: str) -> list:
         """
         Splits text into sentences using the SaT model.
@@ -65,8 +64,8 @@ class SentenceSplitter:
             return [texts]  # Return original texts if splitting fails
 
 if __name__ == "__main__":
-    # Example usage
-    splitter = SentenceSplitter()
+    # Example usage with specific device
+    splitter = SentenceSplitter(device="mps")  # or "cpu"
     
     test_text = """This is a very important sentence about the topic. 
                    This is another sentence. 
